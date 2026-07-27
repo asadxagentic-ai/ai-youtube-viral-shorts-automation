@@ -1,0 +1,1120 @@
+{
+  "name": "YT Viral Shorts Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "yt-automation",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Receive Automation Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -624,
+        1488
+      ],
+      "webhookId": "9b3e127e-0431-4373-87ae-c2b5a6b37202"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst items = $input.all();\nconst raw = items[0].json;\nconst body = raw.body || raw;\nconst youtubeUrl = (body.youtubeUrl || '').trim();\nconst numberOfClips = Math.max(1, Math.min(10, parseInt(body.numberOfClips) || 3));\nconst aspectRatio = (body.aspectRatio || '9:16').trim();\nconst applyCaptions = (body.applyCaptions || 'no').toString().toLowerCase().trim();\nconst ytRegex = /(?:youtube\\.com\\/(?:watch\\?v=|shorts\\/)|youtu\\.be\\/)([a-zA-Z0-9_-]{11})/;\nconst ytMatch = youtubeUrl.match(ytRegex);\nif (!ytMatch) { throw new Error('Invalid YouTube URL. Aspect ratio must be 9:16 or 1:1.'); }\nconst validRatios = ['9:16', '1:1'];\nif (!validRatios.includes(aspectRatio)) { throw new Error('Invalid YouTube URL. Aspect ratio must be 9:16 or 1:1.'); }\nif (numberOfClips < 1 || numberOfClips > 10) { throw new Error('Number of clips must be between 1 and 10.'); }\nconst videoId = ytMatch[1];\nconst executionId = 'exec-' + Date.now();\nreturn [{ json: { youtubeUrl, videoId, numberOfClips, aspectRatio, applyCaptions: applyCaptions === 'yes', executionId, workflowStartTime: Date.now() } }];\n"
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Validate + Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        1488
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst err = $input.first().json;\nconst errorMessage = (err.error && err.error.message) ? err.error.message : (err.message || 'Workflow execution failed');\nreturn [{ json: { clipNumber: 0, videoTitle: 'YT Automation', hookTitle: 'Error: ' + errorMessage, igReelLink: '', youtubeShortLink: '', status: 'Aborted', timespent: 'N/A', errorMessage: errorMessage } }];\n"
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Format Aborted Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4608,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_VALUE_HERE"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "id",
+          "value": "0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Clips Number": "={{ $json.clipNumber }}",
+            "Yt Video Title": "={{ $json.videoTitle }}",
+            "Hook Title": "={{ $json.hookTitle }}",
+            "Ig Reel Link": "={{ $json.igReelLink }}",
+            "Youtube Short Link": "={{ $json.youtubeShortLink }}",
+            "Status": "={{ $json.status }}",
+            "Timespent": "={{ $json.timespent }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "55688140-32f2-44e9-80d1-4621e4b54a88",
+      "name": "Log Aborted to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4800,
+        1232
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "REPLACE_WITH_YOUR_CREDENTIAL_NAME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: $json.errorMessage || \"Invalid YouTube URL. Aspect ratio must be 9:16 or 1:1.\" }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Respond Failure to UI",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        5008,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.socialkit.dev/youtube/download",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-access-key",
+              "value": "YOUR_X_ACCESS_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ url: $json.youtubeUrl, format: 'mp4', quality: '720p' }) }}",
+        "options": {}
+      },
+      "id": "b7c7ccc1-b8f7-45e1-8520-94fe2f17e91e",
+      "name": "Fetch YT Stream URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -176,
+        1424
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rapid = $input.first().json;\nconst validated = $('Validate + Normalize').first().json;\nconst { numberOfClips, aspectRatio, applyCaptions, executionId, workflowStartTime, videoId } = validated;\n\n// SocialKit /youtube/download response shape:\n// { success: true, data: { title, duration: \"3:33\", downloadUrl, fileSize, fileSizeMB, format, quality, expiresIn } }\nconst data = rapid.data || rapid;\n\nconst videoUrl = data.downloadUrl || data.url;\nif (!videoUrl) {\n  throw new Error(\n    'Could not extract video URL from SocialKit response. ' +\n    'Top-level keys: ' + Object.keys(rapid).join(', ') + '. ' +\n    'Raw (first 500 chars): ' + JSON.stringify(rapid).slice(0, 500)\n  );\n}\n\nconst videoTitle = data.title || 'YouTube Video';\n\n// duration comes back as \"MM:SS\" or \"H:MM:SS\" string, convert to seconds\nlet durationSeconds = 300;\nif (data.duration) {\n  const parts = data.duration.toString().split(':').map(function(p) { return parseInt(p, 10) || 0; });\n  if (parts.length === 3) durationSeconds = parts[0] * 3600 + parts[1] * 60 + parts[2];\n  else if (parts.length === 2) durationSeconds = parts[0] * 60 + parts[1];\n  else if (parts.length === 1) durationSeconds = parts[0];\n}\n\nconst systemPrompt = 'You are a viral video strategist. Identify the most engaging clip timestamps from YouTube video metadata. Return ONLY a valid JSON array, no markdown, no explanation.';\nconst userPrompt = 'Video Title: ' + videoTitle + '\\nDuration: ' + durationSeconds + ' seconds\\nRequested Clips: ' + numberOfClips + '\\n\\nIdentify the ' + numberOfClips + ' most viral/trending moments. Each clip must be 20-60 seconds long. Return ONLY a JSON array like: [{\"clipNumber\":1,\"startTime\":0,\"endTime\":45,\"viralReason\":\"Strong hook\"}]';\n\nconst qwenClipBody = {\n  model: 'qwen-plus',\n  messages: [\n    { role: 'system', content: systemPrompt },\n    { role: 'user', content: userPrompt }\n  ],\n  temperature: 0.7,\n  max_tokens: 1000\n};\n\nreturn [{ json: { videoId, numberOfClips, aspectRatio, applyCaptions, executionId, workflowStartTime, videoUrl, videoTitle, durationSeconds, qwenClipBody } }];"
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Parse Stream URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        1344
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "YOUR_AUTHORIZATION_HERE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.qwenClipBody) }}",
+        "options": {}
+      },
+      "id": "5274fd25-7950-42d6-b422-d53556b17c74",
+      "name": "Qwen Select Viral Clips",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        896,
+        992
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst qwenResp = $input.first().json;\nconst streamData = $('Build Drive URL').first().json;\nconst { videoUrl, videoTitle, durationSeconds, numberOfClips, aspectRatio, applyCaptions, executionId, workflowStartTime } = streamData;\nlet clips = [];\ntry {\n  const content = qwenResp.choices[0].message.content.trim();\n  const jsonMatch = content.match(/\\[([\\s\\S]*)\\]/);\n  if (jsonMatch) { clips = JSON.parse('[' + jsonMatch[1] + ']'); } else { clips = JSON.parse(content); }\n} catch (e) {\n  const cd = Math.min(45, Math.floor(durationSeconds / numberOfClips));\n  for (let i = 0; i < numberOfClips; i++) { clips.push({ clipNumber: i + 1, startTime: i * cd, endTime: (i * cd) + cd, viralReason: 'Trending Moment ' + (i + 1) }); }\n}\nclips = clips.slice(0, numberOfClips);\nwhile (clips.length < numberOfClips) {\n  const last = clips[clips.length - 1] || { endTime: 0 };\n  clips.push({ clipNumber: clips.length + 1, startTime: last.endTime || 0, endTime: Math.min((last.endTime || 0) + 45, durationSeconds), viralReason: 'Clip ' + (clips.length + 1) });\n}\nreturn clips.map(function(clip, idx) {\n  const clipDuration = Math.max(5, (clip.endTime || clip.startTime + 30) - clip.startTime);\n  const clipNumber = clip.clipNumber || (idx + 1);\n  const videoTrack = { clips: [{ asset: { type: 'video', src: videoUrl, trim: clip.startTime, volume: 1 }, start: 0, length: clipDuration, fit: 'cover' }] };\n  const tracks = [videoTrack];\n  if (applyCaptions) {\n    tracks.unshift({ clips: [{ asset: { type: 'html', html: '<p>' + (clip.viralReason || '') + '</p>', css: 'p{font-family:Arial Black,sans-serif;font-size:28px;color:#FFF;background:rgba(0,0,0,0.65);padding:10px 20px;border-radius:10px;text-align:center;}', width: 540, height: 120 }, start: 0, length: clipDuration, position: 'bottom', offset: { x: 0, y: -0.08 } }] });\n  }\n  return { json: { clipNumber: clipNumber, viralReason: clip.viralReason || ('Clip ' + clipNumber), clipStartTime: clip.startTime, clipEndTime: clip.endTime, clipDuration: clipDuration, videoTitle: videoTitle, executionId: executionId, workflowStartTime: workflowStartTime, aspectRatio: aspectRatio, shotstackPayload: { timeline: { tracks: tracks }, output: { format: 'mp4', aspectRatio: aspectRatio, resolution: 'hd', fps: 30 } } } };\n});\n"
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Build Shotstack Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        912
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.shotstack.io/edit/stage/render",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "YOUR_X_API_KEY_HERE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.shotstackPayload) }}",
+        "options": {}
+      },
+      "id": "942d2031-f971-4d1e-98e7-a457cdaad308",
+      "name": "Submit Shotstack Render",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1344,
+        848
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst submitResults = $input.all();\nconst buildItems = $('Build Shotstack Items').all();\nconst renderIds = submitResults.map(function(item, idx) {\n  const resp = item.json || {};\n  const renderId = resp.response && resp.response.id ? resp.response.id : (resp.id || null);\n  if (!renderId) throw new Error('Shotstack submission failed for clip ' + (idx + 1) + ': ' + JSON.stringify(resp).slice(0, 200));\n  const bi = buildItems[idx] && buildItems[idx].json ? buildItems[idx].json : {};\n  return { renderId: renderId, clipNumber: bi.clipNumber || (idx + 1), clipDuration: bi.clipDuration || null, viralReason: bi.viralReason || null };\n});\nconst first = buildItems[0] && buildItems[0].json ? buildItems[0].json : {};\nreturn [{ json: { renderIds: renderIds, executionId: first.executionId, workflowStartTime: first.workflowStartTime, videoTitle: first.videoTitle, numberOfClips: renderIds.length } }];\n"
+      },
+      "id": "3ccc90be-08e9-4473-beeb-e53edf28f68e",
+      "name": "Aggregate Render IDs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        768
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.shotstackUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "clipFile"
+            }
+          }
+        }
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Download Rendered Clips",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2688,
+        560
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "inputDataFieldName": "clipFile",
+        "name": "=Clip_{{ $(\"Download Rendered Clips\").item.json.clipNumber }}_{{ $(\"Download Rendered Clips\").item.json.executionId }}.mp4",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_VALUE_HERE",
+          "mode": "list",
+          "cachedResultName": "Yt Automation",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1VRWm0PhBngZrnf8__N0OaxwerWlMdNZ1"
+        },
+        "options": {}
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Upload Clips to Google Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2912,
+        480
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "REPLACE_WITH_YOUR_CREDENTIAL_NAME"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst driveResults = $input.all();\nconst extractedItems = $('Download Rendered Clips').all();\nconst first = extractedItems[0] && extractedItems[0].json ? extractedItems[0].json : {};\nconst clipsWithDrive = driveResults.map(function(item, idx) {\n  const driveFile = item.json || {};\n  const original = extractedItems[idx] && extractedItems[idx].json ? extractedItems[idx].json : {};\n  return { clipNumber: original.clipNumber || (idx + 1), shotstackUrl: original.shotstackUrl, driveFileId: driveFile.id, driveUrl: driveFile.webViewLink, viralReason: original.viralReason, clipDuration: original.clipDuration };\n});\nconst videoTitle = first.videoTitle || 'YouTube Video';\nconst qwenMetaBody = {\n  model: 'qwen-plus',\n  messages: [\n    { role: 'system', content: 'You are a viral social media content creator. Generate catchy hook titles, short descriptions, and trending hashtags. Return ONLY a valid JSON array, no markdown.' },\n    { role: 'user', content: 'Generate hook titles, descriptions and hashtags for ' + clipsWithDrive.length + ' video clips from: \"' + videoTitle + '\". Return ONLY this JSON array: [{\"clipNumber\":1,\"hookTitle\":\"Catchy hook here!\",\"description\":\"Short engaging description.\",\"hashtags\":\"#viral #shorts #trending #youtube\"}]' }\n  ],\n  temperature: 0.8,\n  max_tokens: 2000\n};\nreturn [{ json: { clips: clipsWithDrive, executionId: first.executionId, workflowStartTime: first.workflowStartTime, videoTitle: videoTitle, numberOfClips: clipsWithDrive.length, qwenMetaBody: qwenMetaBody } }];\n"
+      },
+      "id": "894ecfb8-09cd-40c4-895b-c525a9d31e2b",
+      "name": "Collect Drive Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3136,
+        416
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "YOUR_AUTHORIZATION_HERE"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.qwenMetaBody) }}",
+        "options": {}
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Qwen Generate Metadata",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        336
+      ],
+      "executeOnce": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst qwenResp = $input.first().json;\nconst driveData = $('Collect Drive Data').first().json;\nlet clipsMetadata = [];\ntry {\n  const content = qwenResp.choices[0].message.content.trim();\n  const jsonMatch = content.match(/\\[([\\s\\S]*)\\]/);\n  if (jsonMatch) { clipsMetadata = JSON.parse('[' + jsonMatch[1] + ']'); } else { clipsMetadata = JSON.parse(content); }\n} catch (e) {\n  clipsMetadata = driveData.clips.map(function(c) { return { clipNumber: c.clipNumber, hookTitle: driveData.videoTitle + ' - Part ' + c.clipNumber, description: 'Viral clip from ' + driveData.videoTitle + '. Watch till the end!', hashtags: '#viral #shorts #trending #youtube' }; });\n}\nconst enrichedClips = driveData.clips.map(function(clip, idx) {\n  const meta = clipsMetadata.find(function(m) { return m.clipNumber === clip.clipNumber; }) || clipsMetadata[idx] || {};\n  return { clipNumber: clip.clipNumber, shotstackUrl: clip.shotstackUrl, driveFileId: clip.driveFileId, driveUrl: clip.driveUrl, hookTitle: meta.hookTitle || (driveData.videoTitle + ' - Short #' + clip.clipNumber), description: meta.description || ('Viral clip from ' + driveData.videoTitle), hashtags: meta.hashtags || '#viral #shorts #trending #youtube' };\n});\nreturn [{ json: { makePayload: { executionId: driveData.executionId, videoTitle: driveData.videoTitle, totalClips: enrichedClips.length, clips: enrichedClips }, enrichedClips: enrichedClips, executionId: driveData.executionId, workflowStartTime: driveData.workflowStartTime, videoTitle: driveData.videoTitle, numberOfClips: enrichedClips.length } }];\n"
+      },
+      "id": "bb404835-edbd-45b3-acc1-9cdd48081636",
+      "name": "Build Make Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3584,
+        272
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://hook.us2.make.com/1if5m5y5ke8xwpd5ogdnrqwpsf2rtcm7",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.makePayload) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "0386d491-6883-49c1-8326-58436a34a5cf",
+      "name": "Send Payload to Make.com",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3808,
+        192
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst makeResp = $input.first().json;\nconst buildData = $('Build Make Payload').first().json;\nconst clipsString = (makeResp.clips || '').toString();\nconst enrichedClips = buildData.enrichedClips || [];\nconst workflowStartTime = buildData.workflowStartTime || Date.now();\nconst linkLines = clipsString.split('\n').filter(function(l) { return l.trim(); });\nconst linkMap = {};\nlinkLines.forEach(function(line) {\n  const parts = line.split('|');\n  if (parts.length >= 3) { const clipNum = parseInt(parts[0]); linkMap[clipNum] = { ytId: parts[1].trim(), igId: parts[2].trim() }; }\n});\nconst timespentMs = Date.now() - workflowStartTime;\nconst timespentMinutes = (Math.round(timespentMs / 1000 / 60 * 10) / 10) + ' min';\nreturn enrichedClips.map(function(clip) {\n  const links = linkMap[clip.clipNumber] || {};\n  const ytId = links.ytId || '';\n  const igId = links.igId || '';\n  return { json: { clipNumber: clip.clipNumber, videoTitle: buildData.videoTitle, hookTitle: clip.hookTitle, igReelLink: igId ? 'https://www.instagram.com/reel/' + igId + '/' : '', youtubeShortLink: ytId ? 'https://www.youtube.com/shorts/' + ytId : '', status: 'Completed', timespent: timespentMinutes } };\n});\n"
+      },
+      "id": "6743bc49-221b-4ee9-ae98-42613199e915",
+      "name": "Parse Make Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4032,
+        128
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "YOUR_VALUE_HERE"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "id",
+          "value": "0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Clips Number": "={{ $json.clipNumber }}",
+            "Yt Video Title": "={{ $json.videoTitle }}",
+            "Hook Title": "={{ $json.hookTitle }}",
+            "Ig Reel Link": "={{ $json.igReelLink }}",
+            "Youtube Short Link": "={{ $json.youtubeShortLink }}",
+            "Status": "={{ $json.status }}",
+            "Timespent": "={{ $json.timespent }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "29fdb6b2-f4dd-4a24-939d-7229fe6a2d91",
+      "name": "Log Completed to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        4256,
+        48
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "REPLACE_WITH_YOUR_CREDENTIAL_NAME"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: \"Job accepted. Clips are being processed and published.\", executionId: $(\"Validate + Normalize\").first().json.executionId }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Respond Success to UI",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        4480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.videoUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "sourceVideo"
+            }
+          }
+        }
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Download Source Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        240,
+        1264
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "inputDataFieldName": "sourceVideo",
+        "name": "=source_{{ $('Parse Stream URL').first().json.videoId }}.mp4",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_VALUE_HERE",
+          "mode": "list",
+          "cachedResultName": "Raw Video Clips",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1AID4nrl7YRpD8-gKZGSEqxMGxQHGB3sB"
+        },
+        "options": {}
+      },
+      "id": "cec612a9-ef0b-46fa-9636-16096a0d98c3",
+      "name": "Upload Source to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        400,
+        1136
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "REPLACE_WITH_YOUR_CREDENTIAL_NAME"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "share",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.id }}"
+        },
+        "permissionsUi": {
+          "permissionsValues": {
+            "role": "reader",
+            "type": "anyone"
+          }
+        },
+        "options": {}
+      },
+      "id": "YOUR_ID_HERE",
+      "name": "Share Source File",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        560,
+        1072
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "REPLACE_WITH_YOUR_CREDENTIAL_NAME"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const parseData = $('Parse Stream URL').first().json;\nconst driveFileId = $('Upload Source to Drive').first().json.id;\nconst driveVideoUrl = 'https://drive.google.com/uc?export=download&confirm=t&id=' + driveFileId;\nreturn [{ json: { videoId: parseData.videoId, numberOfClips: parseData.numberOfClips, aspectRatio: parseData.aspectRatio, applyCaptions: parseData.applyCaptions, executionId: parseData.executionId, workflowStartTime: parseData.workflowStartTime, videoUrl: driveVideoUrl, videoTitle: parseData.videoTitle, durationSeconds: parseData.durationSeconds, qwenClipBody: parseData.qwenClipBody, sourceDriveFileId: driveFileId } }];"
+      },
+      "id": "c597e86d-8bed-4684-9966-aaf85ed9b9bb",
+      "name": "Build Drive URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        1024
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\nreturn data.renderIds.map(function(r) {\n  return { json: {\n    renderId: r.renderId,\n    clipNumber: r.clipNumber,\n    clipDuration: r.clipDuration,\n    viralReason: r.viralReason,\n    executionId: data.executionId,\n    workflowStartTime: data.workflowStartTime,\n    videoTitle: data.videoTitle,\n    numberOfClips: data.numberOfClips,\n    pollAttempt: 0,\n    shotstackUrl: null,\n    renderStatus: 'queued'\n  }};\n});"
+      },
+      "id": "poll-init-001",
+      "name": "Init Poll State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.shotstack.io/edit/stage/render/{{ $json.renderId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "YOUR_X_API_KEY_HERE"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "poll-http-001",
+      "name": "Poll Shotstack Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2032,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const pollResp = $input.first().json;\nconst prevData = $('Init Poll State').item ? $('Init Poll State').item.json : null;\n\n// Walk back up the chain to get the original item data\nlet origData = {};\ntry { origData = $('Init Poll State').item.json; } catch(e) {}\n\nconst response = (pollResp && pollResp.response) ? pollResp.response : {};\nconst status = response.status || 'unknown';\nconst url = response.url || null;\nconst pollAttempt = (origData.pollAttempt || 0) + 1;\nconst MAX_ATTEMPTS = 20;\n\nif (status === 'failed') {\n  throw new Error('Shotstack render failed for clip ' + origData.clipNumber + ': ' + (response.error || 'Unknown error'));\n}\n\nif (status === 'done' && url) {\n  return [{ json: {\n    ...origData,\n    pollAttempt,\n    renderStatus: 'done',\n    shotstackUrl: url\n  }}];\n}\n\nif (pollAttempt >= MAX_ATTEMPTS) {\n  throw new Error('Render timed out after ' + MAX_ATTEMPTS + ' attempts (~5 min) for clip ' + origData.clipNumber + '. Last status: ' + status);\n}\n\n// Still rendering — pass through with updated attempt count\nreturn [{ json: {\n  ...origData,\n  pollAttempt,\n  renderStatus: status\n}}];"
+      },
+      "id": "poll-check-001",
+      "name": "Check Render Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cond-done",
+              "leftValue": "={{ $json.renderStatus }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "done"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          }
+        },
+        "options": {}
+      },
+      "id": "poll-if-001",
+      "name": "Is Render Done",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2432,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 15
+      },
+      "id": "poll-wait-001",
+      "name": "Wait 15s Before Retry",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2544,
+        656
+      ],
+      "webhookId": "e574c72e-ed4b-4f07-8f8c-a4b77f05ba7a"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Receive Automation Request": {
+      "main": [
+        [
+          {
+            "node": "Validate + Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate + Normalize": {
+      "main": [
+        [
+          {
+            "node": "Fetch YT Stream URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Aborted Data": {
+      "main": [
+        [
+          {
+            "node": "Log Aborted to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Aborted to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Respond Failure to UI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch YT Stream URL": {
+      "main": [
+        [
+          {
+            "node": "Parse Stream URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Stream URL": {
+      "main": [
+        [
+          {
+            "node": "Download Source Video",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen Select Viral Clips": {
+      "main": [
+        [
+          {
+            "node": "Build Shotstack Items",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Shotstack Items": {
+      "main": [
+        [
+          {
+            "node": "Submit Shotstack Render",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Shotstack Render": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Render IDs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Render IDs": {
+      "main": [
+        [
+          {
+            "node": "Init Poll State",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Rendered Clips": {
+      "main": [
+        [
+          {
+            "node": "Upload Clips to Google Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Clips to Google Drive": {
+      "main": [
+        [
+          {
+            "node": "Collect Drive Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Drive Data": {
+      "main": [
+        [
+          {
+            "node": "Qwen Generate Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen Generate Metadata": {
+      "main": [
+        [
+          {
+            "node": "Build Make Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Make Payload": {
+      "main": [
+        [
+          {
+            "node": "Send Payload to Make.com",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Payload to Make.com": {
+      "main": [
+        [
+          {
+            "node": "Parse Make Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Make Response": {
+      "main": [
+        [
+          {
+            "node": "Log Completed to Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Completed to Sheet": {
+      "main": [
+        [
+          {
+            "node": "Respond Success to UI",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Source Video": {
+      "main": [
+        [
+          {
+            "node": "Upload Source to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Source to Drive": {
+      "main": [
+        [
+          {
+            "node": "Share Source File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Share Source File": {
+      "main": [
+        [
+          {
+            "node": "Build Drive URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Drive URL": {
+      "main": [
+        [
+          {
+            "node": "Qwen Select Viral Clips",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Aborted Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Poll State": {
+      "main": [
+        [
+          {
+            "node": "Poll Shotstack Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Poll Shotstack Status": {
+      "main": [
+        [
+          {
+            "node": "Check Render Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Render Status": {
+      "main": [
+        [
+          {
+            "node": "Is Render Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Render Done": {
+      "main": [
+        [
+          {
+            "node": "Download Rendered Clips",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 15s Before Retry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 15s Before Retry": {
+      "main": [
+        [
+          {
+            "node": "Poll Shotstack Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "27208ec3-28b5-4b55-b093-0e466f430d0b",
+  "meta": {
+    "aiBuilderAssisted": true,
+    "builderVariant": "mcp",
+    "instanceId": "YOUR_INSTANCEID_HERE"
+  },
+  "nodeGroups": [],
+  "id": "inWIyHnRTwEiIyIx",
+  "tags": []
+}
